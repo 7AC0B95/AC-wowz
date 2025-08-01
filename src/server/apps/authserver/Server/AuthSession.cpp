@@ -36,16 +36,16 @@ using boost::asio::ip::tcp;
 
 enum eAuthCmd
 {
-    AUTH_LOGON_CHALLENGE = 0x00,
-    AUTH_LOGON_PROOF = 0x01,
-    AUTH_RECONNECT_CHALLENGE = 0x02,
-    AUTH_RECONNECT_PROOF = 0x03,
-    REALM_LIST = 0x10,
-    XFER_INITIATE = 0x30,
-    XFER_DATA = 0x31,
-    XFER_ACCEPT = 0x32,
-    XFER_RESUME = 0x33,
-    XFER_CANCEL = 0x34
+    AUTH_LOGON_CHALLENGE       = 0x00,
+    AUTH_LOGON_PROOF           = 0x01,
+    AUTH_RECONNECT_CHALLENGE   = 0x02,
+    AUTH_RECONNECT_PROOF       = 0x03,
+    REALM_LIST                 = 0x10,
+    XFER_INITIATE              = 0x30,
+    XFER_DATA                  = 0x31,
+    XFER_ACCEPT                = 0x32,
+    XFER_RESUME                = 0x33,
+    XFER_CANCEL                = 0x34
 };
 
 #pragma pack(push, 1)
@@ -123,11 +123,11 @@ std::unordered_map<uint8, AuthHandler> AuthSession::InitHandlers()
 {
     std::unordered_map<uint8, AuthHandler> handlers;
 
-    handlers[AUTH_LOGON_CHALLENGE] =        { STATUS_CHALLENGE,         AUTH_LOGON_CHALLENGE_INITIAL_SIZE, &AuthSession::HandleLogonChallenge };
-    handlers[AUTH_LOGON_PROOF] =            { STATUS_LOGON_PROOF,       sizeof(AUTH_LOGON_PROOF_C),        &AuthSession::HandleLogonProof };
-    handlers[AUTH_RECONNECT_CHALLENGE] =    { STATUS_CHALLENGE,         AUTH_LOGON_CHALLENGE_INITIAL_SIZE, &AuthSession::HandleReconnectChallenge };
-    handlers[AUTH_RECONNECT_PROOF] =        { STATUS_RECONNECT_PROOF,   sizeof(AUTH_RECONNECT_PROOF_C),    &AuthSession::HandleReconnectProof };
-    handlers[REALM_LIST] =                  { STATUS_AUTHED,            REALM_LIST_PACKET_SIZE,            &AuthSession::HandleRealmList };
+    handlers[AUTH_LOGON_CHALLENGE]       =   { STATUS_CHALLENGE,         AUTH_LOGON_CHALLENGE_INITIAL_SIZE, &AuthSession::HandleLogonChallenge };
+    handlers[AUTH_LOGON_PROOF]           =   { STATUS_LOGON_PROOF,       sizeof(AUTH_LOGON_PROOF_C),        &AuthSession::HandleLogonProof };
+    handlers[AUTH_RECONNECT_CHALLENGE]   =   { STATUS_CHALLENGE,         AUTH_LOGON_CHALLENGE_INITIAL_SIZE, &AuthSession::HandleReconnectChallenge };
+    handlers[AUTH_RECONNECT_PROOF]       =   { STATUS_RECONNECT_PROOF,   sizeof(AUTH_RECONNECT_PROOF_C),    &AuthSession::HandleReconnectProof };
+    handlers[REALM_LIST]                 =   { STATUS_AUTHED,            REALM_LIST_PACKET_SIZE,            &AuthSession::HandleRealmList };
 
     return handlers;
 }
@@ -136,13 +136,13 @@ std::unordered_map<uint8, AuthHandler> const Handlers = AuthSession::InitHandler
 
 void AccountInfo::LoadResult(Field* fields)
 {
-    //          0        1          2           3             4             5
+    //           0         1           2            3              4                5
     // SELECT a.id, a.username, a.locked, a.lock_country, a.last_ip, a.failed_logins,
-    //                                 6                                        7
+    //                                         6                                        7
     // ab.unbandate > UNIX_TIMESTAMP() OR ab.unbandate = ab.bandate, ab.unbandate = ab.bandate,
-    //                                 8                                             9
+    //                                         8                                        9
     // ipb.unbandate > UNIX_TIMESTAMP() OR ipb.unbandate = ipb.bandate, ipb.unbandate = ipb.bandate,
-    //      10
+    //       10
     // aa.gmlevel (, more query-specific fields)
     // FROM account a LEFT JOIN account_access aa ON a.id = aa.id LEFT JOIN account_banned ab ON ab.id = a.id AND ab.active = 1 LEFT JOIN ip_banned ipb ON ipb.ip = ? WHERE a.username = ?
 
@@ -410,44 +410,39 @@ void AuthSession::LogonChallengeCallback(PreparedQueryResult result)
         fields[13].Get<Binary, Acore::Crypto::SRP6::VERIFIER_LENGTH>());
 
     // Fill the response packet with the result
-    if (AuthHelper::IsAcceptedClientBuild(_build))
+    pkt << uint8(WOW_SUCCESS);
+
+    pkt.append(_srp6->B);
+    pkt << uint8(1);
+    pkt.append(_srp6->g);
+    pkt << uint8(32);
+    pkt.append(_srp6->N);
+    pkt.append(_srp6->s);
+    pkt.append(VersionChallenge.data(), VersionChallenge.size());
+    pkt << uint8(securityFlags);           // security flags (0x0...0x04)
+
+    if (securityFlags & 0x01)              // PIN input
     {
-        pkt << uint8(WOW_SUCCESS);
-
-        pkt.append(_srp6->B);
-        pkt << uint8(1);
-        pkt.append(_srp6->g);
-        pkt << uint8(32);
-        pkt.append(_srp6->N);
-        pkt.append(_srp6->s);
-        pkt.append(VersionChallenge.data(), VersionChallenge.size());
-        pkt << uint8(securityFlags);            // security flags (0x0...0x04)
-
-        if (securityFlags & 0x01)               // PIN input
-        {
-            pkt << uint32(0);
-            pkt << uint64(0) << uint64(0);      // 16 bytes hash?
-        }
-
-        if (securityFlags & 0x02)               // Matrix input
-        {
-            pkt << uint8(0);
-            pkt << uint8(0);
-            pkt << uint8(0);
-            pkt << uint8(0);
-            pkt << uint64(0);
-        }
-
-        if (securityFlags & 0x04)               // Security token input
-            pkt << uint8(1);
-
-        LOG_DEBUG("server.authserver", "'{}:{}' [AuthChallenge] account {} is using '{}' locale ({})",
-            ipAddress, port, _accountInfo.Login, _localizationName, GetLocaleByName(_localizationName));
-
-        _status = STATUS_LOGON_PROOF;
+        pkt << uint32(0);
+        pkt << uint64(0) << uint64(0);   // 16 bytes hash?
     }
-    else
-        pkt << uint8(WOW_FAIL_VERSION_INVALID);
+
+    if (securityFlags & 0x02)              // Matrix input
+    {
+        pkt << uint8(0);
+        pkt << uint8(0);
+        pkt << uint8(0);
+        pkt << uint8(0);
+        pkt << uint64(0);
+    }
+
+    if (securityFlags & 0x04)              // Security token input
+        pkt << uint8(1);
+
+    LOG_DEBUG("server.authserver", "'{}:{}' [AuthChallenge] account {} is using '{}' locale ({})",
+        ipAddress, port, _accountInfo.Login, _localizationName, GetLocaleByName(_localizationName));
+
+    _status = STATUS_LOGON_PROOF;
 
     SendPacket(pkt);
 }
@@ -460,14 +455,6 @@ bool AuthSession::HandleLogonProof()
 
     // Read the packet
     sAuthLogonProof_C* logonProof = reinterpret_cast<sAuthLogonProof_C*>(GetReadBuffer().GetReadPointer());
-
-    // If the client has no valid version
-    if (_expversion == NO_VALID_EXP_FLAG)
-    {
-        // Check if we have the appropriate patch on the disk
-        LOG_DEBUG("network", "Client with invalid version, patching is not implemented");
-        return false;
-    }
 
     // Check if SRP6 results match (password is correct), else send an error
     if (Optional<SessionKey> K = _srp6->VerifyChallengeResponse(logonProof->A, logonProof->clientM))
@@ -494,7 +481,7 @@ bool AuthSession::HandleLogonProof()
             ByteBuffer packet;
             packet << uint8(AUTH_LOGON_PROOF);
             packet << uint8(WOW_FAIL_UNKNOWN_ACCOUNT);
-            packet << uint16(0);    // LoginFlags, 1 has account message
+            packet << uint16(0);   // LoginFlags, 1 has account message
             SendPacket(packet);
             return true;
         }
@@ -525,15 +512,15 @@ bool AuthSession::HandleLogonProof()
         {
             // Finish SRP6 and send the final result to the client
             ByteBuffer packet;
-            if (_expversion & POST_BC_EXP_FLAG)                 // 2.x and 3.x clients
+            if (_expversion & POST_BC_EXP_FLAG)               // 2.x and 3.x clients
             {
                 sAuthLogonProof_S proof;
                 proof.M2 = M2;
                 proof.cmd = AUTH_LOGON_PROOF;
                 proof.error = 0;
-                proof.AccountFlags = ACCOUNT_FLAG_PROPASS_LOCK;    // enum AccountFlag
+                proof.AccountFlags = ACCOUNT_FLAG_PROPASS_LOCK;   // enum AccountFlag
                 proof.SurveyId = 0;
-                proof.LoginFlags = 0;               // 0x1 = has account message
+                proof.LoginFlags = 0;       // 0x1 = has account message
 
                 packet.resize(sizeof(proof));
                 std::memcpy(packet.contents(), &proof, sizeof(proof));
@@ -559,7 +546,7 @@ bool AuthSession::HandleLogonProof()
         ByteBuffer packet;
         packet << uint8(AUTH_LOGON_PROOF);
         packet << uint8(WOW_FAIL_UNKNOWN_ACCOUNT);
-        packet << uint16(0);    // LoginFlags, 1 has account message
+        packet << uint16(0);   // LoginFlags, 1 has account message
         SendPacket(packet);
 
         LOG_INFO("server.authserver.hack", "'{}:{}' [AuthChallenge] account {} tried to login with invalid password!",
@@ -710,7 +697,7 @@ bool AuthSession::HandleReconnectProof()
         ByteBuffer pkt;
         pkt << uint8(AUTH_RECONNECT_PROOF);
         pkt << uint8(WOW_SUCCESS);
-        pkt << uint16(0);    // LoginFlags, 1 has account message
+        pkt << uint16(0);   // LoginFlags, 1 has account message
         SendPacket(pkt);
         _status = STATUS_AUTHED;
         return true;
@@ -754,7 +741,7 @@ void AuthSession::RealmListCallback(PreparedQueryResult result)
     for (auto const& [realmHandle, realm] : sRealmList->GetRealms())
     {
         // don't work with realms which not compatible with the client
-        bool okBuild = ((_expversion & POST_BC_EXP_FLAG) && realm.Build == _build) || ((_expversion & PRE_BC_EXP_FLAG) && !AuthHelper::IsPreBCAcceptedClientBuild(realm.Build));
+        bool okBuild = true;
 
         // No SQL injection. id of realm is controlled by the database.
         uint32 flag = realm.Flags;
@@ -780,21 +767,21 @@ void AuthSession::RealmListCallback(PreparedQueryResult result)
 
         uint8 lock = (realm.AllowedSecurityLevel > _accountInfo.SecurityLevel) ? 1 : 0;
 
-        pkt << uint8(realm.Type);                           // realm type
-        if (_expversion & POST_BC_EXP_FLAG)                 // only 2.x and 3.x clients
-            pkt << uint8(lock);                             // if 1, then realm locked
+        pkt << uint8(realm.Type);                             // realm type
+        if (_expversion & POST_BC_EXP_FLAG)                   // only 2.x and 3.x clients
+            pkt << uint8(lock);                               // if 1, then realm locked
 
-        pkt << uint8(flag);                                 // RealmFlags
+        pkt << uint8(flag);                                   // RealmFlags
         pkt << name;
         pkt << boost::lexical_cast<std::string>(realm.GetAddressForClient(GetRemoteIpAddress()));
         pkt << float(realm.PopulationLevel);
         pkt << uint8(characterCounts[realm.Id.Realm]);
-        pkt << uint8(realm.Timezone);                       // realm category
+        pkt << uint8(realm.Timezone);                         // realm category
 
-        if (_expversion & POST_BC_EXP_FLAG)                 // 2.x and 3.x clients
+        if (_expversion & POST_BC_EXP_FLAG)                   // 2.x and 3.x clients
             pkt << uint8(realm.Id.Realm);
         else
-            pkt << uint8(0x0);                              // 1.12.1 and 1.12.2 clients
+            pkt << uint8(0x0);                                // 1.12.1 and 1.12.2 clients
 
         if (_expversion & POST_BC_EXP_FLAG && flag & REALM_FLAG_SPECIFYBUILD)
         {
@@ -807,12 +794,12 @@ void AuthSession::RealmListCallback(PreparedQueryResult result)
         ++RealmListSize;
     }
 
-    if (_expversion & POST_BC_EXP_FLAG)                     // 2.x and 3.x clients
+    if (_expversion & POST_BC_EXP_FLAG)                       // 2.x and 3.x clients
     {
         pkt << uint8(0x10);
         pkt << uint8(0x00);
     }
-    else                                                    // 1.12.1 and 1.12.2 clients
+    else                                                      // 1.12.1 and 1.12.2 clients
     {
         pkt << uint8(0x00);
         pkt << uint8(0x02);
@@ -822,7 +809,7 @@ void AuthSession::RealmListCallback(PreparedQueryResult result)
     ByteBuffer RealmListSizeBuffer;
     RealmListSizeBuffer << uint32(0);
 
-    if (_expversion & POST_BC_EXP_FLAG)                     // only 2.x and 3.x clients
+    if (_expversion & POST_BC_EXP_FLAG)                       // only 2.x and 3.x clients
         RealmListSizeBuffer << uint16(RealmListSize);
     else
         RealmListSizeBuffer << uint32(RealmListSize);
@@ -830,45 +817,14 @@ void AuthSession::RealmListCallback(PreparedQueryResult result)
     ByteBuffer hdr;
     hdr << uint8(REALM_LIST);
     hdr << uint16(pkt.size() + RealmListSizeBuffer.size());
-    hdr.append(RealmListSizeBuffer);                        // append RealmList's size buffer
-    hdr.append(pkt);                                        // append realms in the realmlist
+    hdr.append(RealmListSizeBuffer);                          // append RealmList's size buffer
+    hdr.append(pkt);                                          // append realms in the realmlist
     SendPacket(hdr);
 
     _status = STATUS_AUTHED;
 }
 
-bool AuthSession::VerifyVersion(uint8 const* a, int32 aLength, Acore::Crypto::SHA1::Digest const& versionProof, bool isReconnect)
+bool AuthSession::VerifyVersion(uint8 const* /*a*/, int32 /*aLength*/, Acore::Crypto::SHA1::Digest const& /*versionProof*/, bool /*isReconnect*/)
 {
-    if (!sConfigMgr->GetOption<bool>("StrictVersionCheck", false))
-        return true;
-
-    Acore::Crypto::SHA1::Digest zeros{};
-    Acore::Crypto::SHA1::Digest const* versionHash{ nullptr };
-
-    if (!isReconnect)
-    {
-        RealmBuildInfo const* buildInfo = sRealmList->GetBuildInfo(_build);
-        if (!buildInfo)
-            return false;
-
-        if (_os == "Win")
-            versionHash = &buildInfo->WindowsHash;
-        else if (_os == "OSX")
-            versionHash = &buildInfo->MacHash;
-
-        if (!versionHash)
-            return false;
-
-        if (zeros == *versionHash)
-            return true;                                                            // not filled serverside
-    }
-    else
-        versionHash = &zeros;
-
-    Acore::Crypto::SHA1 version;
-    version.UpdateData(a, aLength);
-    version.UpdateData(*versionHash);
-    version.Finalize();
-
-    return (versionProof == version.GetDigest());
+    return true;
 }
